@@ -59,4 +59,202 @@
         <div class="card"><small>Aktif Rejim</small><p id="viewBitki">-</p></div>
         <div class="card" style="border-left-color: #2b8a3e;"><small>Toprak Nemi</small><p id="viewToprak">-%</p><span class="eski-veri" id="toprakZaman"></span></div>
         <div class="card" style="border-left-color: #e63946;"><small>Sıcaklık</small><p id="viewSicaklik">- °C</p><span class="eski-veri" id="sicaklikZaman"></span></div>
-        <div class="card" style="border-left-color: #15aabf;"><small>Ortam Nemi</small><p id="viewOrtamNem">-%</p
+        <div class="card" style="border-left-color: #15aabf;"><small>Ortam Nemi</small><p id="viewOrtamNem">-%</p></div>
+        <div class="card" style="border-left-color: #f76707; grid-column: span 2;"><small>Su Pompası</small><p id="viewPompa">-</p></div>
+        
+        <!-- Manuel Mod Bildirimi -->
+        <div id="manuelBildirim" class="manuel-bildirim">
+            ⚠️ <strong>Manuel Mod Aktif!</strong> Otomatik sulama devre dışı. "Otomatik Moda Dön" butonuna basarak otomatiğe geçebilirsiniz.
+        </div>
+
+        <!-- Manuel Kontrol -->
+        <div class="kontrol-card">
+            <strong style="color: #343a40;">🕹️ Manuel Su Pompası Kontrolü:</strong>
+            <button class="btn-ac" onclick="manuelPompaKomutu('AC')">💧 Pompayı AÇ</button>
+            <button class="btn-kapat" onclick="manuelPompaKomutu('KAPAT')">🛑 Pompayı KAPAT</button>
+            <button class="btn-oto" onclick="otomatikModaDon()">🔄 Otomatik Moda Dön</button>
+        </div>
+
+        <!-- Grafik -->
+        <div class="grafik-card">
+            <strong style="color: #1e3c72; display:block; margin-bottom:10px;">📊 Zaman Serisi Grafiği:</strong>
+            <canvas id="tarimGrafik" style="width:100%; height:200px;"></canvas>
+        </div>
+
+        <div class="yz-card">
+            <strong style="color: #d9480f;">🤖 Yapay Zeka Karar Birimi:</strong>
+            <p id="viewYz" style="font-size: 14px; margin: 5px 0 0 0; color: #495057; font-style: italic;">Veri bekleniyor...</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    const adafruit_username = "iot1436";
+    const adafruit_key = "aio_IWBP42SmBoJ5LXQ0MzGLol46DZZs"; // Public read için gerekli değil ama API call için lazım
+
+    // MQTT Client
+    const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "web_istemci_" + Math.random().toString(16).substr(2, 8));
+
+    client.onConnectionLost = onConnectionLost;
+    client.onMessageArrived = onMessageArrived;
+
+    client.connect({onSuccess:onConnect});
+
+    // Grafik
+    const ctx = document.getElementById('tarimGrafik').getContext('2d');
+    const veriZamanEtiketleri = [];
+    const sicaklikVeriHavuza = [];
+    const nemVeriHavuza = [];
+
+    const tarimGrafikNesnesi = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: veriZamanEtiketleri,
+            datasets: [
+                { label: 'Sıcaklık (°C)', data: sicaklikVeriHavuza, borderColor: '#e63946', backgroundColor: 'transparent', tension: 0.2 },
+                { label: 'Toprak Nemi (%)', data: nemVeriHavuza, borderColor: '#2b8a3e', backgroundColor: 'transparent', tension: 0.2 }
+            ]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+
+    function guncelleGrafik(tip, deger) {
+        const simdi = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        if (veriZamanEtiketleri.length > 7) {
+            veriZamanEtiketleri.shift();
+            sicaklikVeriHavuza.shift();
+            nemVeriHavuza.shift();
+        }
+        
+        if(veriZamanEtiketleri[veriZamanEtiketleri.length - 1] !== simdi) {
+            veriZamanEtiketleri.push(simdi);
+        }
+
+        if(tip === 'sicaklik') {
+            sicaklikVeriHavuza[veriZamanEtiketleri.length - 1] = parseFloat(deger);
+        } else if(tip === 'nem') {
+            nemVeriHavuza[veriZamanEtiketleri.length - 1] = parseFloat(deger);
+        }
+        tarimGrafikNesnesi.update();
+    }
+
+    // 🆕 YENİ: Adafruit IO'dan son verileri çek (sayfa açılınca)
+    async function eskiVerileriCek() {
+        try {
+            // Adafruit IO API'den son verileri çek
+            // Not: Public feed'ler için key gerekmeyebilir, ama private ise key lazım
+            const sicaklikResponse = await fetch(`https://io.adafruit.com/api/v2/${adafruit_username}/feeds/sicaklik/data/last`);
+            const nemResponse = await fetch(`https://io.adafruit.com/api/v2/${adafruit_username}/feeds/toprak-nemi/data/last`);
+            
+            if (sicaklikResponse.ok) {
+                const sData = await sicaklikResponse.json();
+                document.getElementById("viewSicaklik").innerText = sData.value + " °C";
+                document.getElementById("sicaklikZaman").innerText = "Son güncelleme: " + new Date(sData.created_at).toLocaleString('tr-TR');
+                guncelleGrafik('sicaklik', sData.value);
+            }
+            
+            if (nemResponse.ok) {
+                const nData = await nemResponse.json();
+                document.getElementById("viewToprak").innerText = "%" + nData.value;
+                document.getElementById("toprakZaman").innerText = "Son güncelleme: " + new Date(nData.created_at).toLocaleString('tr-TR');
+                guncelleGrafik('nem', nData.value);
+            }
+            
+            if (sicaklikResponse.ok || nemResponse.ok) {
+                document.getElementById("viewYz").innerText = "Son kayıtlı veriler yüklendi. Canlı bağlantı bekleniyor...";
+            }
+        } catch(e) {
+            console.log("Eski veri çekme hatası:", e);
+            document.getElementById("viewYz").innerText = "Adafruit IO'dan veri çekilemedi. Cihaz çevrimdışı olabilir.";
+        }
+    }
+
+    // Sayfa açılınca eski verileri çek
+    eskiVerileriCek();
+
+    function onConnect() {
+        document.getElementById("status").innerText = "Buluta Bağlandı (Canlı)";
+        document.getElementById("status").className = "status-bar connected";
+        client.subscribe("akilli_tarim/cihaz_veri"); 
+        client.subscribe(adafruit_username + "/feeds/sicaklik");
+        client.subscribe(adafruit_username + "/feeds/toprak-nemi");
+    }
+
+    function onConnectionLost(responseObject) {
+        document.getElementById("status").innerText = "Bağlantı Koptu! Son veriler gösteriliyor.";
+        document.getElementById("status").className = "status-bar disconnected";
+    }
+
+    function onMessageArrived(message) {
+        const simdi = new Date().toLocaleTimeString('tr-TR');
+
+        // Adafruit feeds
+        if (message.destinationName.includes("feeds/sicaklik")) {
+            document.getElementById("viewSicaklik").innerText = message.payloadString + " °C";
+            document.getElementById("sicaklikZaman").innerText = "Canlı: " + simdi;
+            guncelleGrafik('sicaklik', message.payloadString);
+            return;
+        }
+        if (message.destinationName.includes("feeds/toprak-nemi")) {
+            document.getElementById("viewToprak").innerText = "%" + message.payloadString;
+            document.getElementById("toprakZaman").innerText = "Canlı: " + simdi;
+            guncelleGrafik('nem', message.payloadString);
+            return;
+        }
+
+        // ESP32 canlı paket
+        try {
+            const veri = JSON.parse(message.payloadString);
+            if(veri.bitki) document.getElementById("viewBitki").innerText = veri.bitki;
+            if(veri.toprak_nem) {
+                document.getElementById("viewToprak").innerText = "%" + veri.toprak_nem;
+                guncelleGrafik('nem', veri.toprak_nem);
+            }
+            if(veri.sicaklik) {
+                document.getElementById("viewSicaklik").innerText = veri.sicaklik + " °C";
+                guncelleGrafik('sicaklik', veri.sicaklik);
+            }
+            if(veri.ortam_nem) document.getElementById("viewOrtamNem").innerText = "%" + veri.ortam_nem;
+            if(veri.pompa) document.getElementById("viewPompa").innerText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
+            if(veri.yz_mesaj) document.getElementById("viewYz").innerText = veri.yz_mesaj;
+            
+            // 🆕 Manuel mod gösterimi
+            if(veri.manuel_mod === true) {
+                document.getElementById("manuelBildirim").style.display = "block";
+                document.getElementById("viewPompa").innerText += " (MANUEL)";
+            } else {
+                document.getElementById("manuelBildirim").style.display = "none";
+            }
+        } catch(e) {
+            console.log("JSON hatası");
+        }
+    }
+
+    function komutGonder() {
+        const secilen = document.getElementById("bitkiSecici").value;
+        const jsonKomut = JSON.stringify({ komut_bitki: secilen });
+        const message = new Paho.MQTT.Message(jsonKomut);
+        message.destinationName = "akilli_tarim/web_komut";
+        client.send(message);
+        alert(secilen + " rejimi gönderildi!");
+    }
+
+    function manuelPompaKomutu(durum) {
+        const jsonKomut = JSON.stringify({ pompa_komut: durum });
+        const message = new Paho.MQTT.Message(jsonKomut);
+        message.destinationName = "akilli_tarim/web_komut";
+        client.send(message);
+        alert(durum === 'AC' ? "Pompa AÇILDI (Manuel mod aktif!)" : "Pompa KAPATILDI (Manuel mod aktif!)");
+    }
+
+    // 🆕 YENİ: Otomatik moda dön
+    function otomatikModaDon() {
+        const jsonKomut = JSON.stringify({ mod: "otomatik" });
+        const message = new Paho.MQTT.Message(jsonKomut);
+        message.destinationName = "akilli_tarim/web_komut";
+        client.send(message);
+        alert("Otomatik sulama moduna geçildi!");
+    }
+</script>
+</body>
+</html>
