@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YZ Akıllı Tarım Yönetim Merkezi</title>
-    <!-- Doğru Paho MQTT Bağlantı Kütüphanesi -->
+    <!-- Resmi MQTT Bağlantı Kütüphanesi -->
     <script src="https://cloudflare.com" type="text/javascript"></script>
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #eef2f3; margin: 0; padding: 20px; text-align: center; }
@@ -18,9 +18,14 @@
         .card h3 { margin: 0 0 5px 0; font-size: 14px; color: #6c757d; }
         .card p { margin: 0; font-size: 22px; font-weight: bold; color: #333; }
         .yz-card { background: #fff9db; border-left: 5px solid #f59f00; grid-column: span 2; padding: 15px; border-radius: 8px; text-align: left; }
+        .kontrol-card { background: #f1f3f5; border-left: 5px solid #495057; grid-column: span 2; padding: 15px; border-radius: 8px; text-align: center; }
         select { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #ced4da; font-size: 16px; margin-top: 10px; }
         button { width: 100%; padding: 12px; background: #1e3c72; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: 0.2s; }
         button:hover { background: #2a5298; }
+        .btn-ac { background-color: #2b8a3e; margin-bottom: 5px; }
+        .btn-ac:hover { background-color: #237032; }
+        .btn-kapat { background-color: #e63946; }
+        .btn-kapat:hover { background-color: #b82e38; }
     </style>
 </head>
 <body>
@@ -40,14 +45,21 @@
         <button onclick="komutGonder()">Seçilen Rejimi Bitkiye Uygula</button>
     </div>
 
-    <!-- Canlı Veriler -->
+    <!-- Canlı Veriler (Adafruit Veritabanından ve ESP32'den Beslenir) -->
     <div class="grid">
         <div class="card"><small>Aktif Çalışan Rejim</small><p id="viewBitki">-</p></div>
-        <div class="card" style="border-left-color: #2b8a3e;"><small>Toprak Nemi</small><p id="viewToprak">-%</p></div>
-        <div class="card" style="border-left-color: #e63946;"><small>Ortam Sıcaklığı</small><p id="viewSicaklik">- °C</p></div>
+        <div class="card" style="border-left-color: #2b8a3e;"><small>Toprak Nemi (DB Canlı)</small><p id="viewToprak">-%</p></div>
+        <div class="card" style="border-left-color: #e63946;"><small>Ortam Sıcaklığı (DB Canlı)</small><p id="viewSicaklik">- °C</p></div>
         <div class="card" style="border-left-color: #15aabf;"><small>Ortam Nemi</small><p id="viewOrtamNem">-%</p></div>
         <div class="card" style="border-left-color: #f76707; grid-column: span 2;"><small>Su Pompası Durumu</small><p id="viewPompa">-</p></div>
         
+        <!-- Manuel Motor Kontrol Butonları -->
+        <div class="kontrol-card">
+            <strong style="color: #343a40;">🕹️ Manuel Su Pompası Kontrolü:</strong>
+            <button class="btn-ac" onclick="manuelPompaKomutu('AC')">💧 Su Pompasını Manuel AÇ</button>
+            <button class="btn-kapat" onclick="manuelPompaKomutu('KAPAT')">🛑 Su Pompasını Manuel KAPAT</button>
+        </div>
+
         <div class="yz-card">
             <strong style="color: #d9480f;">🤖 Yapay Zeka Karar Birimi:</strong>
             <p id="viewYz" style="font-size: 14px; margin: 5px 0 0 0; color: #495057; font-style: italic;">Veri bekleniyor...</p>
@@ -56,7 +68,10 @@
 </div>
 
 <script>
-    // Broker ayarları düzeltildi (Ücretsiz genel HiveMQ WebSocket adresi eklendi)
+    // Adafruit Kullanıcı Adınız Sabitlendi
+    const adafruit_username = "iot1436";
+
+    // Broker ayarları (HiveMQ WebSocket kanalı)
     const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "web_istemci_" + Math.random().toString(16).substr(2, 8));
 
     client.onConnectionLost = onConnectionLost;
@@ -67,7 +82,11 @@
     function onConnect() {
         document.getElementById("status").innerText = "Buluta Bağlandı (Canlı)";
         document.getElementById("status").className = "status-bar connected";
-        client.subscribe("akilli_tarim/cihaz_veri"); 
+        client.subscribe("akilli_tarim/cihaz_veri"); // ESP32 canlı verilerini dinle
+        
+        // Veritabanına düşen son verileri okumak için Adafruit feed kanallarına da subscribe oluyoruz
+        client.subscribe(adafruit_username + "/feeds/sicaklik");
+        client.subscribe(adafruit_username + "/feeds/toprak-nemi");
     }
 
     function onConnectionLost(responseObject) {
@@ -76,19 +95,31 @@
     }
 
     function onMessageArrived(message) {
+        // 1. Durum: Adafruit Veritabanı Feedlerinden gelen ham veriler
+        if (message.destinationName.includes("feeds/sicaklik")) {
+            document.getElementById("viewSicaklik").innerText = message.payloadString + " °C";
+            return;
+        }
+        if (message.destinationName.includes("feeds/toprak-nemi")) {
+            document.getElementById("viewToprak").innerText = "%" + message.payloadString;
+            return;
+        }
+
+        // 2. Durum: Cihazın doğrudan fırlattığı toplu JSON paketleri
         try {
             const veri = JSON.parse(message.payloadString);
-            document.getElementById("viewBitki").innerText = veri.bitki;
-            document.getElementById("viewToprak").innerText = "%" + veri.toprak_nem;
-            document.getElementById("viewSicaklik").innerText = veri.sicaklik + " °C";
-            document.getElementById("viewOrtamNem").innerText = "%" + veri.ortam_nem;
-            document.getElementById("viewPompa").innerText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
-            document.getElementById("viewYz").innerText = veri.yz_mesaj;
+            if(veri.bitki) document.getElementById("viewBitki").innerText = veri.bitki;
+            if(veri.toprak_nem) document.getElementById("viewToprak").innerText = "%" + veri.toprak_nem;
+            if(veri.sicaklik) document.getElementById("viewSicaklik").innerText = veri.sicaklik + " °C";
+            if(veri.ortam_nem) document.getElementById("viewOrtamNem").innerText = "%" + veri.ortam_nem;
+            if(veri.pompa) document.getElementById("viewPompa").innerText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
+            if(veri.yz_mesaj) document.getElementById("viewYz").innerText = veri.yz_mesaj;
         } catch(e) {
-            console.log("JSON Çözme Hatası");
+            console.log("JSON Çözme Atası");
         }
     }
 
+    // Rejim Değişikliği Komutu Gönderme
     function komutGonder() {
         const secilen = document.getElementById("bitkiSecici").value;
         const jsonKomut = JSON.stringify({ komut_bitki: secilen });
@@ -96,6 +127,19 @@
         message.destinationName = "akilli_tarim/web_komut";
         client.send(message);
         alert(secilen + " sulama rejimi komutu gönderildi!");
+    }
+
+    // İstendiği Zaman Motoru Aktif/Pasif Eden Manuel Komut Buton Fonksiyonu
+    function manuelPompaKomutu(durum) {
+        const jsonKomut = JSON.stringify({ pompa_komut: durum });
+        const message = new Paho.MQTT.Message(jsonKomut);
+        message.destinationName = "akilli_tarim/web_komut";
+        client.send(message);
+        if(durum === 'AC') {
+            alert("Su Pompasını AÇMA komutu kartınıza iletildi!");
+        } else {
+            alert("Su Pompasını KAPATMA komutu kartınıza iletildi!");
+        }
     }
 </script>
 </body>
