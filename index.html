@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YZ Akıllı Tarım Yönetim Merkezi</title>
+    <!-- MQTT Bağlantısı için Paho Kütüphanesi -->
+    <script src="https://cloudflare.com" type="text/javascript"></script>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #eef2f3; margin: 0; padding: 20px; text-align: center; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.08); }
+        h1 { color: #1e3c72; margin-bottom: 5px; }
+        .status-bar { display: inline-block; padding: 5px 15px; border-radius: 20px; font-size: 14px; font-weight: bold; margin-bottom: 20px; }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; text-align: left; }
+        .card { background: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #2a5298; }
+        .card h3 { margin: 0 0 5px 0; font-size: 14px; color: #6c757d; }
+        .card p { margin: 0; font-size: 22px; font-weight: bold; color: #333; }
+        .yz-card { background: #fff9db; border-left: 5px solid #f59f00; grid-column: span 2; padding: 15px; border-radius: 8px; text-align: left; }
+        select { width: 100%; padding: 12px; border-radius: 6px; border: 1px solid #ced4da; font-size: 16px; margin-top: 10px; }
+        button { width: 100%; padding: 12px; background: #1e3c72; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: 0.2s; }
+        button:hover { background: #2a5298; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🌿 Akıllı Tarım Kontrol Paneli</h1>
+    <div id="status" class="status-bar disconnected">Bulut Bağlantısı Kuruluyor...</div>
+
+    <!-- Bitki Seçim Formu -->
+    <div style="text-align: left; margin-bottom: 25px;">
+        <label style="font-weight: bold; color: #495057;">🌱 Hedef Bitki Rejimi Seçimi:</label>
+        <select id="bitkiSecici">
+            <option value="Marul">Marul (Kritik Nem Eşiği: %60)</option>
+            <option value="Nane">Nane (Kritik Nem Eşiği: %55)</option>
+            <option value="Fesleğen">Fesleğen (Kritik Nem Eşiği: %45)</option>
+        </select>
+        <button onclick="komutGonder()">Seçilen Rejimi Bitkiye Uygula</button>
+    </div>
+
+    <!-- Canlı Veriler -->
+    <div class="grid">
+        <div class="card"><small>Aktif Çalışan Rejim</small><p id="viewBitki">-</p></div>
+        <div class="card" style="border-left-color: #2b8a3e;"><small>Toprak Nemi</small><p id="viewToprak">-%</p></div>
+        <div class="card" style="border-left-color: #e63946;"><small>Ortam Sıcaklığı</small><p id="viewSicaklik">- °C</p></div>
+        <div class="card" style="border-left-color: #15aabf;"><small>Ortam Nemi</small><p id="viewOrtamNem">-%</p></div>
+        <div class="card" style="border-left-color: #f76707; grid-column: span 2;"><small>Su Pompası Durumu</small><p id="viewPompa">-</p></div>
+        
+        <div class="yz-card">
+            <strong style="color: #d9480f;">🤖 Yapay Zeka Karar Birimi:</strong>
+            <p id="viewYz" style="font-size: 14px; margin: 5px 0 0 0; color: #495057; font-style: italic;">Veri bekleniyor...</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Broker ayarları (WebSockets portu üzerinden bağlanıyoruz)
+    const client = new Paho.MQTT.Client("://hivemq.com", Number(8000), "web_istemci_" + Math.random().toString(16).substr(2, 8));
+
+    client.onConnectionLost = onConnectionLost;
+    client.onMessageArrived = onMessageArrived;
+
+    client.connect({onSuccess:onConnect});
+
+    function onConnect() {
+        document.getElementById("status").innerText = "Buluta Bağlandı (Canlı)";
+        document.getElementById("status").className = "status-bar connected";
+        client.subscribe("akilli_tarim/cihaz_veri"); // Cihazdan gelenleri dinle
+    }
+
+    function onConnectionLost(responseObject) {
+        document.getElementById("status").innerText = "Bağlantı Koptu!";
+        document.getElementById("status").className = "status-bar disconnected";
+    }
+
+    // ESP32'den veri (JSON) geldiğinde tetiklenen alan
+    function onMessageArrived(message) {
+        try {
+            const veri = JSON.parse(message.payloadString);
+            document.getElementById("viewBitki").innerText = veri.bitki;
+            document.getElementById("viewToprak").innerText = "%" + veri.toprak_nem;
+            document.getElementById("viewSicaklik").innerText = veri.sicaklik + " °C";
+            document.getElementById("viewOrtamNem").innerText = "%" + veri.ortam_nem;
+            document.getElementById("viewPompa").innerText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
+            document.getElementById("viewYz").innerText = veri.yz_mesaj;
+        } catch(e) {
+            console.log("JSON Çözme Hatası");
+        }
+    }
+
+    // GitHub arayüzünden butonla ESP32'ye komut gönderme
+    function komutGonder() {
+        const secilen = document.getElementById("bitkiSecici").value;
+        const jsonKomut = JSON.stringify({ komut_bitki: secilen });
+        const message = new Paho.MQTT.Message(jsonKomut);
+        message.destinationName = "akilli_tarim/web_komut";
+        client.send(message);
+        alert(secilen + " sulama rejimi komutu gönderildi!");
+    }
+</script>
+</body>
+</html>
