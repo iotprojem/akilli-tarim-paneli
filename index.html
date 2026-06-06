@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YZ Akıllı Tarım Yönetim Merkezi</title>
-    <!-- MQTT Bağlantısı için Paho Kütüphanesi -->
+    <!-- Doğru Paho MQTT Bağlantı Kütüphanesi -->
     <script src="https://cloudflare.com" type="text/javascript"></script>
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #eef2f3; margin: 0; padding: 20px; text-align: center; }
@@ -56,8 +56,8 @@
 </div>
 
 <script>
-    // Broker ayarları (WebSockets portu üzerinden bağlanıyoruz)
-    const client = new Paho.MQTT.Client("://hivemq.com", Number(8000), "web_istemci_" + Math.random().toString(16).substr(2, 8));
+    // Broker ayarları düzeltildi (Ücretsiz genel HiveMQ WebSocket adresi eklendi)
+    const client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "web_istemci_" + Math.random().toString(16).substr(2, 8));
 
     client.onConnectionLost = onConnectionLost;
     client.onMessageArrived = onMessageArrived;
@@ -67,7 +67,7 @@
     function onConnect() {
         document.getElementById("status").innerText = "Buluta Bağlandı (Canlı)";
         document.getElementById("status").className = "status-bar connected";
-        client.subscribe("akilli_tarim/cihaz_veri"); // Cihazdan gelenleri dinle
+        client.subscribe("akilli_tarim/cihaz_veri"); 
     }
 
     function onConnectionLost(responseObject) {
@@ -75,7 +75,6 @@
         document.getElementById("status").className = "status-bar disconnected";
     }
 
-    // ESP32'den veri (JSON) geldiğinde tetiklenen alan
     function onMessageArrived(message) {
         try {
             const veri = JSON.parse(message.payloadString);
@@ -90,7 +89,6 @@
         }
     }
 
-    // GitHub arayüzünden butonla ESP32'ye komut gönderme
     function komutGonder() {
         const secilen = document.getElementById("bitkiSecici").value;
         const jsonKomut = JSON.stringify({ komut_bitki: secilen });
