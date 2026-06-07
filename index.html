@@ -114,7 +114,7 @@
     let mqttBagli = false;
 
     // ============================================
-    // GRAFİK - DÜZELTİLMİŞ
+    // GRAFİK - DÜZELTİLMİŞ (Zaman Eşitleme)
     // ============================================
     function grafikBaslat() {
         try {
@@ -124,8 +124,8 @@
                 data: {
                     labels: [],
                     datasets: [
-                        { label: 'Sıcaklık (°C)', data: [], borderColor: '#e63946', backgroundColor: 'transparent', tension: 0.2 },
-                        { label: 'Toprak Nemi (%)', data: [], borderColor: '#2b8a3e', backgroundColor: 'transparent', tension: 0.2 }
+                        { label: 'Sıcaklık (°C)', data: [], borderColor: '#e63946', backgroundColor: 'transparent', tension: 0.2, spanGaps: true },
+                        { label: 'Toprak Nemi (%)', data: [], borderColor: '#2b8a3e', backgroundColor: 'transparent', tension: 0.2, spanGaps: true }
                     ]
                 },
                 options: { 
@@ -138,53 +138,38 @@
         } catch(e) { console.log("Grafik hatası:", e); }
     }
 
-    // 🆕 DÜZELTİLMİŞ: Basit ve güvenilir grafik güncelleme
-    function guncelleGrafik(tip, deger) {
+    // 🆕 DÜZELTİLMİŞ: Aynı saniyede gelen sıcaklık+nem tek X noktasında birleşir
+    function guncelleGrafik(tip, deger, zamanEtiketi = null) {
         if (!tarimGrafikNesnesi) {
             console.log("Grafik nesnesi yok");
             return;
         }
 
-        const simdi = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const simdi = zamanEtiketi || new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         const labels = tarimGrafikNesnesi.data.labels;
         const sicaklikData = tarimGrafikNesnesi.data.datasets[0].data;
         const nemData = tarimGrafikNesnesi.data.datasets[1].data;
 
-        // Maksimum 8 veri noktası
-        if (labels.length >= 8) {
-            labels.shift();
-            sicaklikData.shift();
-            nemData.shift();
-        }
-
-        // Yeni etiket ekle
-        labels.push(simdi);
-
-        // Veriyi ekle - diğer dataset'e null ekle (sonradan doldurulacak)
-        if (tip === 'sicaklik') {
-            sicaklikData.push(parseFloat(deger));
-            // Nem verisi yoksa son değeri tekrarla veya null
-            if (nemData.length < sicaklikData.length) {
-                nemData.push(nemData.length > 0 ? nemData[nemData.length - 1] : null);
+        // Aynı saniyede mi kontrol et
+        if (labels.length > 0 && labels[labels.length - 1] === simdi) {
+            // Mevcut satırı güncelle (diğer dataset boş kalmaz)
+            if (tip === 'sicaklik') sicaklikData[sicaklikData.length - 1] = parseFloat(deger);
+            if (tip === 'nem') nemData[nemData.length - 1] = parseFloat(deger);
+        } else {
+            // Yeni zaman dilimi ekle
+            if (labels.length >= 20) {
+                labels.shift();
+                sicaklikData.shift();
+                nemData.shift();
             }
-        } else if (tip === 'nem') {
-            nemData.push(parseFloat(deger));
-            // Sıcaklık verisi yoksa son değeri tekrarla veya null
-            if (sicaklikData.length < nemData.length) {
-                sicaklikData.push(sicaklikData.length > 0 ? sicaklikData[sicaklikData.length - 1] : null);
-            }
+            labels.push(simdi);
+            // Yeni satırda eksik veriyi önceki değerle doldur
+            sicaklikData.push(tip === 'sicaklik' ? parseFloat(deger) : (sicaklikData.length > 0 ? sicaklikData[sicaklikData.length - 1] : null));
+            nemData.push(tip === 'nem' ? parseFloat(deger) : (nemData.length > 0 ? nemData[nemData.length - 1] : null));
         }
 
-        // Eşitle - eksik olanları doldur
-        while (sicaklikData.length < labels.length) {
-            sicaklikData.push(sicaklikData.length > 0 ? sicaklikData[sicaklikData.length - 1] : null);
-        }
-        while (nemData.length < labels.length) {
-            nemData.push(nemData.length > 0 ? nemData[nemData.length - 1] : null);
-        }
-
-        tarimGrafikNesnesi.update('none'); // animasyonsuz güncelle
-        console.log("Grafik güncellendi:", tip, "=", deger);
+        tarimGrafikNesnesi.update('none');
+        console.log("Grafik güncellendi:", tip, "=", deger, "zaman:", simdi);
     }
 
     // ============================================
@@ -245,6 +230,8 @@
             const sicaklikResponse = await fetch('https://io.adafruit.com/api/v2/iot1436/feeds/sicaklik');
             const nemResponse = await fetch('https://io.adafruit.com/api/v2/iot1436/feeds/toprak-nemi');
             let veriGeldi = false;
+            // 🆕 Aynı zaman etiketi kullan (tek nokta oluştur)
+            const simdi = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
             if (sicaklikResponse.ok) {
                 const sData = await sicaklikResponse.json();
@@ -254,7 +241,7 @@
                 document.getElementById("sicaklikZaman").innerText = "Son güncelleme: " + zaman;
                 localStorage.setItem('sonSicaklik', deger);
                 localStorage.setItem('sonZaman', zaman);
-                guncelleGrafik('sicaklik', deger);
+                guncelleGrafik('sicaklik', deger, simdi);
                 veriGeldi = true;
                 console.log("Sıcaklık yüklendi:", deger);
             }
@@ -266,7 +253,7 @@
                 document.getElementById("toprakZaman").innerText = "Son güncelleme: " + zaman;
                 localStorage.setItem('sonNem', deger);
                 localStorage.setItem('sonZaman', zaman);
-                guncelleGrafik('nem', deger);
+                guncelleGrafik('nem', deger, simdi);
                 veriGeldi = true;
                 console.log("Nem yüklendi:", deger);
             }
@@ -281,11 +268,10 @@
     }
 
     // ============================================
-    // MQTT.js BAĞLANTISI (Paho yerine)
+    // MQTT.js BAĞLANTISI (WSS - Güvenli WebSocket)
     // ============================================
     function mqttBaslat() {
         try {
-            // MQTT.js global nesnesi var mı kontrol et
             if (typeof mqtt === 'undefined') {
                 console.log("MQTT.js yüklenmemiş!");
                 document.getElementById("status").innerText = "MQTT kütüphanesi yüklenemedi - Sadece API verileri";
@@ -293,7 +279,7 @@
                 return;
             }
 
-            // WebSocket üzerinden bağlan (HiveMQ WebSocket portu 8000)
+            // 🆕 DÜZELTİLDİ: ws://8000 → wss://8884 (HTTPS sayfasından güvenli bağlantı)
             mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
                 clientId: 'web_istemci_' + Math.random().toString(16).substr(2, 8),
                 keepalive: 60,
@@ -306,7 +292,6 @@
                 document.getElementById("status").className = "status-bar connected";
                 console.log("MQTT bağlandı");
 
-                // Abonelikler
                 mqttClient.subscribe('akilli_tarim/cihaz_veri');
                 mqttClient.subscribe('iot1436/feeds/sicaklik');
                 mqttClient.subscribe('iot1436/feeds/toprak-nemi');
@@ -316,19 +301,20 @@
                 const payload = message.toString();
                 console.log("MQTT mesaj:", topic, payload);
 
-                const simdi = new Date().toLocaleTimeString('tr-TR');
+                // 🆕 Aynı mesaj/anı için tek zaman etiketi
+                const simdi = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
                 if (topic.includes('feeds/sicaklik')) {
                     document.getElementById("viewSicaklik").innerText = payload + " °C";
                     document.getElementById("sicaklikZaman").innerText = "Canlı: " + simdi;
-                    guncelleGrafik('sicaklik', payload);
+                    guncelleGrafik('sicaklik', payload, simdi);
                     localStorage.setItem('sonSicaklik', payload);
                     return;
                 }
                 if (topic.includes('feeds/toprak-nemi')) {
                     document.getElementById("viewToprak").innerText = "%" + payload;
                     document.getElementById("toprakZaman").innerText = "Canlı: " + simdi;
-                    guncelleGrafik('nem', payload);
+                    guncelleGrafik('nem', payload, simdi);
                     localStorage.setItem('sonNem', payload);
                     return;
                 }
@@ -339,11 +325,13 @@
                         if(veri.bitki) document.getElementById("viewBitki").innerText = veri.bitki;
                         if(veri.toprak_nem) {
                             document.getElementById("viewToprak").innerText = "%" + veri.toprak_nem;
-                            guncelleGrafik('nem', veri.toprak_nem);
+                            document.getElementById("toprakZaman").innerText = "Canlı: " + simdi;
+                            guncelleGrafik('nem', veri.toprak_nem, simdi);
                         }
                         if(veri.sicaklik) {
                             document.getElementById("viewSicaklik").innerText = veri.sicaklik + " °C";
-                            guncelleGrafik('sicaklik', veri.sicaklik);
+                            document.getElementById("sicaklikZaman").innerText = "Canlı: " + simdi;
+                            guncelleGrafik('sicaklik', veri.sicaklik, simdi);
                         }
                         if(veri.ortam_nem) document.getElementById("viewOrtamNem").innerText = "%" + veri.ortam_nem;
                         if(veri.pompa) {
