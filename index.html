@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YZ Akıllı Tarım Yönetim Merkezi</title>
 
-    <!-- PAHO MQTT - DOĞRU CDN -->
-    <script src="https://unpkg.com/paho-mqtt@1.1.0/paho-mqtt.min.js"></script>
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PAHO MQTT - Alternatif CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/paho-mqtt@1.1.0/paho-mqtt-min.js"></script>
 
     <style>
         body { font-family: 'Segoe UI', Arial, sans-serif; background-color: #eef2f3; margin: 0; padding: 20px; text-align: center; }
@@ -42,9 +42,8 @@
 
 <div class="container">
     <h1>🌿 Akıllı Tarım Kontrol Paneli</h1>
-    <div id="status" class="status-bar disconnected">Bulut Bağlantısı Kuruluyor...</div>
+    <div id="status" class="status-bar disconnected">Yükleniyor...</div>
 
-    <!-- Bitki Seçim -->
     <div style="text-align: left; margin-bottom: 25px;">
         <label style="font-weight: bold; color: #495057;">🌱 Hedef Bitki Rejimi:</label>
         <select id="bitkiSecici">
@@ -55,7 +54,6 @@
         <button onclick="komutGonder()">Rejimi Uygula</button>
     </div>
 
-    <!-- Canlı Veriler -->
     <div class="grid">
         <div class="card"><small>Aktif Rejim</small><p id="viewBitki">-</p></div>
         <div class="card" style="border-left-color: #2b8a3e;"><small>Toprak Nemi</small><p id="viewToprak">-%</p><span class="eski-veri" id="toprakZaman"></span></div>
@@ -63,12 +61,10 @@
         <div class="card" style="border-left-color: #15aabf;"><small>Ortam Nemi</small><p id="viewOrtamNem">-%</p></div>
         <div class="card" style="border-left-color: #f76707; grid-column: span 2;"><small>Su Pompası</small><p id="viewPompa">-</p></div>
 
-        <!-- Manuel Mod Bildirimi -->
         <div id="manuelBildirim" class="manuel-bildirim">
-            ⚠️ <strong>Manuel Mod Aktif!</strong> Otomatik sulama devre dışı. "Otomatik Moda Dön" butonuna basarak otomatiğe geçebilirsiniz.
+            ⚠️ <strong>Manuel Mod Aktif!</strong> Otomatik sulama devre dışı.
         </div>
 
-        <!-- Manuel Kontrol -->
         <div class="kontrol-card">
             <strong style="color: #343a40;">🕹️ Manuel Su Pompası Kontrolü:</strong>
             <button class="btn-ac" onclick="manuelPompaKomutu('AC')">💧 Pompayı AÇ</button>
@@ -76,7 +72,6 @@
             <button class="btn-oto" onclick="otomatikModaDon()">🔄 Otomatik Moda Dön</button>
         </div>
 
-        <!-- Grafik -->
         <div class="grafik-card">
             <strong style="color: #1e3c72; display:block; margin-bottom:10px;">📊 Zaman Serisi Grafiği:</strong>
             <canvas id="tarimGrafik" style="width:100%; height:200px;"></canvas>
@@ -90,42 +85,48 @@
 </div>
 
 <script>
-    const adafruit_username = "iot1436";
-
     // ============================================
-    // 🆕 ÖNCE: localStorage'dan eski verileri yükle (hata olursa bile çalışır)
+    // 1. ÖNCE: localStorage'dan verileri yükle (en güvenli)
     // ============================================
     function localStorageVeriYukle() {
-        const eskiSicaklik = localStorage.getItem('sonSicaklik');
-        const eskiNem = localStorage.getItem('sonNem');
-        const eskiZaman = localStorage.getItem('sonZaman');
-        const eskiBitki = localStorage.getItem('sonBitki');
-        const eskiPompa = localStorage.getItem('sonPompa');
-        const eskiYz = localStorage.getItem('sonYz');
-        const eskiOrtamNem = localStorage.getItem('sonOrtamNem');
+        try {
+            const eskiSicaklik = localStorage.getItem('sonSicaklik');
+            const eskiNem = localStorage.getItem('sonNem');
+            const eskiZaman = localStorage.getItem('sonZaman');
+            const eskiBitki = localStorage.getItem('sonBitki');
+            const eskiPompa = localStorage.getItem('sonPompa');
+            const eskiYz = localStorage.getItem('sonYz');
+            const eskiOrtamNem = localStorage.getItem('sonOrtamNem');
 
-        if (eskiSicaklik) {
-            document.getElementById("viewSicaklik").innerText = eskiSicaklik + " °C";
-            document.getElementById("sicaklikZaman").innerText = "Son görülen: " + (eskiZaman || "bilinmiyor");
+            if (eskiSicaklik) {
+                document.getElementById("viewSicaklik").innerText = eskiSicaklik + " °C";
+                document.getElementById("sicaklikZaman").innerText = "Son görülen: " + (eskiZaman || "bilinmiyor");
+            }
+            if (eskiNem) {
+                document.getElementById("viewToprak").innerText = "%" + eskiNem;
+                document.getElementById("toprakZaman").innerText = "Son görülen: " + (eskiZaman || "bilinmiyor");
+            }
+            if (eskiBitki) document.getElementById("viewBitki").innerText = eskiBitki;
+            if (eskiPompa) document.getElementById("viewPompa").innerText = eskiPompa;
+            if (eskiOrtamNem) document.getElementById("viewOrtamNem").innerText = "%" + eskiOrtamNem;
+            if (eskiYz) document.getElementById("viewYz").innerText = eskiYz + " (Çevrimdışı - son kayıtlı veri)";
+
+            console.log("localStorage verileri yüklendi");
+        } catch(e) {
+            console.log("localStorage hatası:", e);
         }
-        if (eskiNem) {
-            document.getElementById("viewToprak").innerText = "%" + eskiNem;
-            document.getElementById("toprakZaman").innerText = "Son görülen: " + (eskiZaman || "bilinmiyor");
-        }
-        if (eskiBitki) document.getElementById("viewBitki").innerText = eskiBitki;
-        if (eskiPompa) document.getElementById("viewPompa").innerText = eskiPompa;
-        if (eskiOrtamNem) document.getElementById("viewOrtamNem").innerText = "%" + eskiOrtamNem;
-        if (eskiYz) document.getElementById("viewYz").innerText = eskiYz + " (Çevrimdışı - son kayıtlı veri)";
     }
 
-    // Sayfa açılır açılmaz localStorage'dan yükle
+    // Hemen çalıştır
     localStorageVeriYukle();
 
     // ============================================
-    // 🆕 SONRA: Adafruit IO'dan son verileri çek
+    // 2. SONRA: Adafruit IO'dan son verileri çek
     // ============================================
     async function eskiVerileriCek() {
         try {
+            console.log("Adafruit API'den veri çekiliyor...");
+
             const sicaklikResponse = await fetch('https://io.adafruit.com/api/v2/iot1436/feeds/sicaklik');
             const nemResponse = await fetch('https://io.adafruit.com/api/v2/iot1436/feeds/toprak-nemi');
 
@@ -138,9 +139,13 @@
 
                 document.getElementById("viewSicaklik").innerText = deger + " °C";
                 document.getElementById("sicaklikZaman").innerText = "Son güncelleme: " + zaman;
+
                 localStorage.setItem('sonSicaklik', deger);
                 localStorage.setItem('sonZaman', zaman);
                 veriGeldi = true;
+                console.log("Sıcaklık yüklendi:", deger);
+            } else {
+                console.log("Sıcaklık API hatası:", sicaklikResponse.status);
             }
 
             if (nemResponse.ok) {
@@ -150,40 +155,35 @@
 
                 document.getElementById("viewToprak").innerText = "%" + deger;
                 document.getElementById("toprakZaman").innerText = "Son güncelleme: " + zaman;
+
                 localStorage.setItem('sonNem', deger);
                 localStorage.setItem('sonZaman', zaman);
                 veriGeldi = true;
+                console.log("Nem yüklendi:", deger);
+            } else {
+                console.log("Nem API hatası:", nemResponse.status);
             }
 
             if (veriGeldi) {
                 document.getElementById("viewYz").innerText = "Adafruit IO'dan son veriler yüklendi. Canlı bağlantı bekleniyor...";
+                document.getElementById("status").innerText = "Adafruit verileri yüklendi - MQTT bağlantısı bekleniyor...";
+            } else {
+                document.getElementById("status").innerText = "API'den veri alınamadı - Son kayıtlı veriler gösteriliyor";
             }
 
         } catch(e) {
             console.log("Adafruit API hatası:", e);
+            document.getElementById("status").innerText = "API hatası - Son kayıtlı veriler gösteriliyor";
         }
     }
 
-    // API'den de çek
+    // API'den veri çek
     eskiVerileriCek();
 
     // ============================================
-    // MQTT (hata olursa diye try-catch içinde)
+    // 3. GRAFİK (Chart.js)
     // ============================================
-    let client = null;
     let tarimGrafikNesnesi = null;
-
-    try {
-        client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "web_istemci_" + Math.random().toString(16).substr(2, 8));
-        client.onConnectionLost = onConnectionLost;
-        client.onMessageArrived = onMessageArrived;
-        client.connect({onSuccess:onConnect});
-    } catch(e) {
-        console.log("MQTT bağlantı hatası:", e);
-        document.getElementById("status").innerText = "MQTT bağlantı hatası - Yalnızca son kayıtlı veriler gösteriliyor";
-    }
-
-    // Grafik
     try {
         const ctx = document.getElementById('tarimGrafik').getContext('2d');
         tarimGrafikNesnesi = new Chart(ctx, {
@@ -227,32 +227,77 @@
     }
 
     // ============================================
-    // localStorage'a veri kaydet
+    // 4. MQTT BAĞLANTISI (Hata toleranslı)
     // ============================================
-    function localStorageVeriKaydet(veri) {
-        if(veri.sicaklik) localStorage.setItem('sonSicaklik', veri.sicaklik);
-        if(veri.toprak_nem) localStorage.setItem('sonNem', veri.toprak_nem);
-        if(veri.bitki) localStorage.setItem('sonBitki', veri.bitki);
-        if(veri.pompa) {
-            const pompaText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
-            localStorage.setItem('sonPompa', pompaText);
+    let client = null;
+    let mqttBagli = false;
+
+    function mqttBaslat() {
+        try {
+            // Paho yüklendi mi kontrol et
+            if (typeof Paho === 'undefined' || typeof Paho.MQTT === 'undefined' || typeof Paho.MQTT.Client === 'undefined') {
+                console.log("Paho MQTT kütüphanesi yüklenmemiş!");
+                document.getElementById("status").innerText = "MQTT kütüphanesi yüklenemedi - Sadece API verileri gösteriliyor";
+                document.getElementById("status").className = "status-bar disconnected";
+                return;
+            }
+
+            client = new Paho.MQTT.Client("broker.hivemq.com", Number(8000), "web_istemci_" + Math.random().toString(16).substr(2, 8));
+            client.onConnectionLost = onConnectionLost;
+            client.onMessageArrived = onMessageArrived;
+            client.connect({onSuccess:onConnect});
+            console.log("MQTT bağlantısı başlatıldı");
+        } catch(e) {
+            console.log("MQTT başlatma hatası:", e);
+            document.getElementById("status").innerText = "MQTT başlatılamadı - API verileri aktif";
+            document.getElementById("status").className = "status-bar disconnected";
         }
-        if(veri.ortam_nem) localStorage.setItem('sonOrtamNem', veri.ortam_nem);
-        if(veri.yz_mesaj) localStorage.setItem('sonYz', veri.yz_mesaj);
-        localStorage.setItem('sonZaman', new Date().toLocaleTimeString('tr-TR'));
+    }
+
+    // Paho yüklenmesini bekle veya hemen dene
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', mqttBaslat);
+    } else {
+        // Sayfa zaten yüklendiyse, Paho'nun yüklenmesi için kısa bekle
+        setTimeout(mqttBaslat, 1000);
+    }
+
+    function localStorageVeriKaydet(veri) {
+        try {
+            if(veri.sicaklik) localStorage.setItem('sonSicaklik', veri.sicaklik);
+            if(veri.toprak_nem) localStorage.setItem('sonNem', veri.toprak_nem);
+            if(veri.bitki) localStorage.setItem('sonBitki', veri.bitki);
+            if(veri.pompa) {
+                const pompaText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
+                localStorage.setItem('sonPompa', pompaText);
+            }
+            if(veri.ortam_nem) localStorage.setItem('sonOrtamNem', veri.ortam_nem);
+            if(veri.yz_mesaj) localStorage.setItem('sonYz', veri.yz_mesaj);
+            localStorage.setItem('sonZaman', new Date().toLocaleTimeString('tr-TR'));
+        } catch(e) {
+            console.log("localStorage kaydetme hatası:", e);
+        }
     }
 
     function onConnect() {
+        mqttBagli = true;
         document.getElementById("status").innerText = "Buluta Bağlandı (Canlı)";
         document.getElementById("status").className = "status-bar connected";
-        client.subscribe("akilli_tarim/cihaz_veri"); 
-        client.subscribe(adafruit_username + "/feeds/sicaklik");
-        client.subscribe(adafruit_username + "/feeds/toprak-nemi");
+        try {
+            client.subscribe("akilli_tarim/cihaz_veri"); 
+            client.subscribe("iot1436/feeds/sicaklik");
+            client.subscribe("iot1436/feeds/toprak-nemi");
+            console.log("MQTT abonelikler tamamlandı");
+        } catch(e) {
+            console.log("Abonelik hatası:", e);
+        }
     }
 
     function onConnectionLost(responseObject) {
+        mqttBagli = false;
         document.getElementById("status").innerText = "Bağlantı Koptu! Son veriler gösteriliyor.";
         document.getElementById("status").className = "status-bar disconnected";
+        console.log("MQTT bağlantı koptu");
     }
 
     function onMessageArrived(message) {
@@ -309,40 +354,55 @@
     }
 
     function komutGonder() {
-        if (!client || !client.isConnected()) {
+        if (!client || !mqttBagli) {
             alert("MQTT bağlantısı yok! Komut gönderilemiyor.");
             return;
         }
-        const secilen = document.getElementById("bitkiSecici").value;
-        const jsonKomut = JSON.stringify({ komut_bitki: secilen });
-        const message = new Paho.MQTT.Message(jsonKomut);
-        message.destinationName = "akilli_tarim/web_komut";
-        client.send(message);
-        alert(secilen + " rejimi gönderildi!");
+        try {
+            const secilen = document.getElementById("bitkiSecici").value;
+            const jsonKomut = JSON.stringify({ komut_bitki: secilen });
+            const message = new Paho.MQTT.Message(jsonKomut);
+            message.destinationName = "akilli_tarim/web_komut";
+            client.send(message);
+            alert(secilen + " rejimi gönderildi!");
+        } catch(e) {
+            console.log("Komut gönderme hatası:", e);
+            alert("Komut gönderilemedi!");
+        }
     }
 
     function manuelPompaKomutu(durum) {
-        if (!client || !client.isConnected()) {
+        if (!client || !mqttBagli) {
             alert("MQTT bağlantısı yok! Komut gönderilemiyor.");
             return;
         }
-        const jsonKomut = JSON.stringify({ pompa_komut: durum });
-        const message = new Paho.MQTT.Message(jsonKomut);
-        message.destinationName = "akilli_tarim/web_komut";
-        client.send(message);
-        alert(durum === 'AC' ? "Pompa AÇILDI (Manuel mod aktif!)" : "Pompa KAPATILDI (Manuel mod aktif!)");
+        try {
+            const jsonKomut = JSON.stringify({ pompa_komut: durum });
+            const message = new Paho.MQTT.Message(jsonKomut);
+            message.destinationName = "akilli_tarim/web_komut";
+            client.send(message);
+            alert(durum === 'AC' ? "Pompa AÇILDI (Manuel mod aktif!)" : "Pompa KAPATILDI (Manuel mod aktif!)");
+        } catch(e) {
+            console.log("Komut gönderme hatası:", e);
+            alert("Komut gönderilemedi!");
+        }
     }
 
     function otomatikModaDon() {
-        if (!client || !client.isConnected()) {
+        if (!client || !mqttBagli) {
             alert("MQTT bağlantısı yok! Komut gönderilemiyor.");
             return;
         }
-        const jsonKomut = JSON.stringify({ mod: "otomatik" });
-        const message = new Paho.MQTT.Message(jsonKomut);
-        message.destinationName = "akilli_tarim/web_komut";
-        client.send(message);
-        alert("Otomatik sulama moduna geçildi!");
+        try {
+            const jsonKomut = JSON.stringify({ mod: "otomatik" });
+            const message = new Paho.MQTT.Message(jsonKomut);
+            message.destinationName = "akilli_tarim/web_komut";
+            client.send(message);
+            alert("Otomatik sulama moduna geçildi!");
+        } catch(e) {
+            console.log("Komut gönderme hatası:", e);
+            alert("Komut gönderilemedi!");
+        }
     }
 </script>
 </body>
