@@ -86,7 +86,79 @@
 
 <script>
     // ============================================
-    // 1. ÖNCE: localStorage'dan verileri yükle (en güvenli)
+    // GLOBAL VERİ DEĞİŞKENLERİ (Grafik için)
+    // ============================================
+    const veriZamanEtiketleri = [];
+    const sicaklikVeriHavuza = [];
+    const nemVeriHavuza = [];
+    let tarimGrafikNesnesi = null;
+    let client = null;
+    let mqttBagli = false;
+
+    // ============================================
+    // 1. GRAFİK BAŞLAT (Önce oluştur)
+    // ============================================
+    function grafikBaslat() {
+        try {
+            const ctx = document.getElementById('tarimGrafik').getContext('2d');
+            tarimGrafikNesnesi = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: veriZamanEtiketleri,
+                    datasets: [
+                        { label: 'Sıcaklık (°C)', data: sicaklikVeriHavuza, borderColor: '#e63946', backgroundColor: 'transparent', tension: 0.2 },
+                        { label: 'Toprak Nemi (%)', data: nemVeriHavuza, borderColor: '#2b8a3e', backgroundColor: 'transparent', tension: 0.2 }
+                    ]
+                },
+                options: { responsive: true, scales: { y: { beginAtZero: true } } }
+            });
+            console.log("Grafik başlatıldı");
+        } catch(e) {
+            console.log("Grafik başlatma hatası:", e);
+        }
+    }
+
+    function guncelleGrafik(tip, deger) {
+        if (!tarimGrafikNesnesi) {
+            console.log("Grafik nesnesi yok, güncellenemiyor");
+            return;
+        }
+
+        const simdi = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        // Maksimum 8 veri noktası tut
+        if (veriZamanEtiketleri.length > 7) {
+            veriZamanEtiketleri.shift();
+            sicaklikVeriHavuza.shift();
+            nemVeriHavuza.shift();
+        }
+
+        // Yeni zaman etiketi ekle (sondan farklıysa)
+        if(veriZamanEtiketleri[veriZamanEtiketleri.length - 1] !== simdi) {
+            veriZamanEtiketleri.push(simdi);
+            // Yeni etiket eklendiğinde diğer dataset'e de boş değer ekle
+            if (tip === 'sicaklik') {
+                sicaklikVeriHavuza.push(parseFloat(deger));
+                nemVeriHavuza.push(nemVeriHavuza.length > 0 ? nemVeriHavuza[nemVeriHavuza.length - 1] : null);
+            } else if (tip === 'nem') {
+                nemVeriHavuza.push(parseFloat(deger));
+                sicaklikVeriHavuza.push(sicaklikVeriHavuza.length > 0 ? sicaklikVeriHavuza[sicaklikVeriHavuza.length - 1] : null);
+            }
+        } else {
+            // Aynı zamanda güncelle
+            if(tip === 'sicaklik') {
+                sicaklikVeriHavuza[sicaklikVeriHavuza.length - 1] = parseFloat(deger);
+            } else if(tip === 'nem') {
+                nemVeriHavuza[nemVeriHavuza.length - 1] = parseFloat(deger);
+            }
+        }
+
+        tarimGrafikNesnesi.update();
+        console.log("Grafik güncellendi:", tip, "=", deger);
+    }
+
+    // ============================================
+    // 2. localStorage İŞLEMLERİ
     // ============================================
     function localStorageVeriYukle() {
         try {
@@ -117,11 +189,25 @@
         }
     }
 
-    // Hemen çalıştır
-    localStorageVeriYukle();
+    function localStorageVeriKaydet(veri) {
+        try {
+            if(veri.sicaklik) localStorage.setItem('sonSicaklik', veri.sicaklik);
+            if(veri.toprak_nem) localStorage.setItem('sonNem', veri.toprak_nem);
+            if(veri.bitki) localStorage.setItem('sonBitki', veri.bitki);
+            if(veri.pompa) {
+                const pompaText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
+                localStorage.setItem('sonPompa', pompaText);
+            }
+            if(veri.ortam_nem) localStorage.setItem('sonOrtamNem', veri.ortam_nem);
+            if(veri.yz_mesaj) localStorage.setItem('sonYz', veri.yz_mesaj);
+            localStorage.setItem('sonZaman', new Date().toLocaleTimeString('tr-TR'));
+        } catch(e) {
+            console.log("localStorage kaydetme hatası:", e);
+        }
+    }
 
     // ============================================
-    // 2. SONRA: Adafruit IO'dan son verileri çek
+    // 3. Adafruit IO'dan veri çek
     // ============================================
     async function eskiVerileriCek() {
         try {
@@ -142,6 +228,10 @@
 
                 localStorage.setItem('sonSicaklik', deger);
                 localStorage.setItem('sonZaman', zaman);
+
+                // 🆕 GRAFİĞE EKLE
+                guncelleGrafik('sicaklik', deger);
+
                 veriGeldi = true;
                 console.log("Sıcaklık yüklendi:", deger);
             } else {
@@ -158,6 +248,10 @@
 
                 localStorage.setItem('sonNem', deger);
                 localStorage.setItem('sonZaman', zaman);
+
+                // 🆕 GRAFİĞE EKLE
+                guncelleGrafik('nem', deger);
+
                 veriGeldi = true;
                 console.log("Nem yüklendi:", deger);
             } else {
@@ -177,64 +271,11 @@
         }
     }
 
-    // API'den veri çek
-    eskiVerileriCek();
-
     // ============================================
-    // 3. GRAFİK (Chart.js)
+    // 4. MQTT BAĞLANTISI
     // ============================================
-    let tarimGrafikNesnesi = null;
-    try {
-        const ctx = document.getElementById('tarimGrafik').getContext('2d');
-        tarimGrafikNesnesi = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [
-                    { label: 'Sıcaklık (°C)', data: [], borderColor: '#e63946', backgroundColor: 'transparent', tension: 0.2 },
-                    { label: 'Toprak Nemi (%)', data: [], borderColor: '#2b8a3e', backgroundColor: 'transparent', tension: 0.2 }
-                ]
-            },
-            options: { responsive: true, scales: { y: { beginAtZero: true } } }
-        });
-    } catch(e) {
-        console.log("Grafik hatası:", e);
-    }
-
-    function guncelleGrafik(tip, deger) {
-        if (!tarimGrafikNesnesi) return;
-        const simdi = new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        const labels = tarimGrafikNesnesi.data.labels;
-        const sicaklikData = tarimGrafikNesnesi.data.datasets[0].data;
-        const nemData = tarimGrafikNesnesi.data.datasets[1].data;
-
-        if (labels.length > 7) {
-            labels.shift();
-            sicaklikData.shift();
-            nemData.shift();
-        }
-
-        if(labels[labels.length - 1] !== simdi) {
-            labels.push(simdi);
-        }
-
-        if(tip === 'sicaklik') {
-            sicaklikData[labels.length - 1] = parseFloat(deger);
-        } else if(tip === 'nem') {
-            nemData[labels.length - 1] = parseFloat(deger);
-        }
-        tarimGrafikNesnesi.update();
-    }
-
-    // ============================================
-    // 4. MQTT BAĞLANTISI (Hata toleranslı)
-    // ============================================
-    let client = null;
-    let mqttBagli = false;
-
     function mqttBaslat() {
         try {
-            // Paho yüklendi mi kontrol et
             if (typeof Paho === 'undefined' || typeof Paho.MQTT === 'undefined' || typeof Paho.MQTT.Client === 'undefined') {
                 console.log("Paho MQTT kütüphanesi yüklenmemiş!");
                 document.getElementById("status").innerText = "MQTT kütüphanesi yüklenemedi - Sadece API verileri gösteriliyor";
@@ -251,31 +292,6 @@
             console.log("MQTT başlatma hatası:", e);
             document.getElementById("status").innerText = "MQTT başlatılamadı - API verileri aktif";
             document.getElementById("status").className = "status-bar disconnected";
-        }
-    }
-
-    // Paho yüklenmesini bekle veya hemen dene
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', mqttBaslat);
-    } else {
-        // Sayfa zaten yüklendiyse, Paho'nun yüklenmesi için kısa bekle
-        setTimeout(mqttBaslat, 1000);
-    }
-
-    function localStorageVeriKaydet(veri) {
-        try {
-            if(veri.sicaklik) localStorage.setItem('sonSicaklik', veri.sicaklik);
-            if(veri.toprak_nem) localStorage.setItem('sonNem', veri.toprak_nem);
-            if(veri.bitki) localStorage.setItem('sonBitki', veri.bitki);
-            if(veri.pompa) {
-                const pompaText = veri.pompa == "ACIK" ? "💧 SULUYOR (Açık)" : "💤 BEKLEMEDE (Kapalı)";
-                localStorage.setItem('sonPompa', pompaText);
-            }
-            if(veri.ortam_nem) localStorage.setItem('sonOrtamNem', veri.ortam_nem);
-            if(veri.yz_mesaj) localStorage.setItem('sonYz', veri.yz_mesaj);
-            localStorage.setItem('sonZaman', new Date().toLocaleTimeString('tr-TR'));
-        } catch(e) {
-            console.log("localStorage kaydetme hatası:", e);
         }
     }
 
@@ -404,6 +420,21 @@
             alert("Komut gönderilemedi!");
         }
     }
+
+    // ============================================
+    // BAŞLANGIÇ SIRASI
+    // ============================================
+    // 1. Önce grafik başlat
+    grafikBaslat();
+
+    // 2. localStorage'dan yükle
+    localStorageVeriYukle();
+
+    // 3. Adafruit API'den çek
+    eskiVerileriCek();
+
+    // 4. MQTT başlat (1 saniye bekle kütüphane yüklenmesi için)
+    setTimeout(mqttBaslat, 1000);
 </script>
 </body>
 </html>
