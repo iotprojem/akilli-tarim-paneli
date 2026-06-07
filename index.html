@@ -294,7 +294,7 @@
             }
 
             // WebSocket üzerinden bağlan (HiveMQ WebSocket portu 8000)
-            mqttClient = mqtt.connect('ws://broker.hivemq.com:8000/mqtt', {
+            mqttClient = mqtt.connect('wss://broker.hivemq.com:8884/mqtt', {
                 clientId: 'web_istemci_' + Math.random().toString(16).substr(2, 8),
                 keepalive: 60,
                 reconnectPeriod: 5000
